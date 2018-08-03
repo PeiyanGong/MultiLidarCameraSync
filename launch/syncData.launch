@@ -1,0 +1,21 @@
+<launch>
+  <!-- <param name="/use_sim_time" value="true"/> -->
+  
+  <!-- rosbag rate -->
+  <arg name="rate" default="0.2" />
+  <!-- Sync -->
+  <node pkg="naive_sync" type="naive_sync" name="naive_sync" output="screen">
+    <remap from="/image_raw" to="/pg_15307894/image_raw"/>
+    <remap from="/odom" to="/integrated_to_init"/>
+    <remap from="/pointcloud04" to="/ns4/velodyne_points"/>
+    <remap from="/pointcloud03" to="/ns3/velodyne_points"/>
+    <remap from="/pointcloud05" to="/ns5/velodyne_points"/>
+    <remap from="/pointcloud01" to="/ns1/velodyne_points"/>
+    <remap from="/pointcloud02" to="/ns2/velodyne_points"/>
+    <param name="num_of_lidar" type="int" value="3"/>
+    <param name="lidar_hz" type="int" value="10"/>
+    <param name="correct_distortion" type="bool" value="true"/>
+  </node>  
+  <!-- rosbag player -->
+  <node pkg="rosbag" type="play" name="player" args=" -r $(arg rate) /home/vince/Documents/Mcity/ROSBAG/2018-07-10-12-09-33.bag"/>
+</launch>
