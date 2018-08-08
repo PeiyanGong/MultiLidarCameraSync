@@ -14,7 +14,7 @@
     <remap from="/pointcloud02" to="/ns2/velodyne_points"/>
     <param name="num_of_lidar" type="int" value="3"/>
     <param name="lidar_hz" type="int" value="10"/>
-    <param name="correct_distortion" type="bool" value="true"/>
+    <param name="correct_distortion" type="bool" value="false"/>
   </node>  
   <!-- rosbag player -->
   <node pkg="rosbag" type="play" name="player" args=" -r $(arg rate) /home/vince/Documents/Mcity/ROSBAG/2018-07-10-12-09-33.bag"/>

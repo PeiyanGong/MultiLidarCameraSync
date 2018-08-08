@@ -5,6 +5,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/Image.h>
 #include <nav_msgs/Odometry.h>
+#include <visualization_msgs/Marker.h>
 
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
@@ -26,6 +27,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <fstream>
+#include <sstream>      // std::istringstream
 #include <string>
 #include <ctime>
 #include <math.h>
@@ -38,7 +41,7 @@ using namespace message_filters;
 class LidarCameraSync
 {
 public:
-	explicit LidarCameraSync(const int& lidarNums = 1, const int lidar_Hz = 10, const bool _correct_distortion = false);
+	explicit LidarCameraSync(const int& lidarNums = 1, const int lidar_Hz = 10, const bool _correct_distortion = false, const bool publish_bbox = true);
 	//~LidarCameraSync();
 
 	void callback_1lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
@@ -58,14 +61,17 @@ public:
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_05);
 protected:
 	void parse_Calibration();
+
 	void write_Lidar(const pcl::PointCloud<pcl::PointXYZI>::Ptr& ptrCloud);
 	void write_camera(const sensor_msgs::ImageConstPtr& Camera_msg);
+	void publish_prediction();
 	void transform_pointcloud();
 	void update_variables(const sensor_msgs::ImageConstPtr& Camera_msg,
                                         const nav_msgs::Odometry::ConstPtr& GPS_msg, 
                                         const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04);
 
 private:
+	std::vector<std::array<float,16>> read_prediction(std::string name);
 	void _transform_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr ptrCloud, const Eigen::Matrix4f& cal_Matrix);
 	void _transform_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr ptrCloud);
 	void _undistort_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr ptrCloud);
@@ -77,6 +83,7 @@ private:
 	ros::NodeHandle nh;
 	ros::Publisher pub_pointcloud;
 	ros::Publisher pub_pointcloud_wo_correction;
+	ros::Publisher pred_bbox;
 
 	message_filters::Subscriber<sensor_msgs::Image> Camera;
 
@@ -104,6 +111,7 @@ private:
 
     bool correct_distortion;
     bool calib_parsed;
+    bool publish_3dbbox;
 	int firstSeq;
 	int lidar_number;
 	size_t frameNums;
@@ -111,6 +119,7 @@ private:
 	std::string imageDir;
 	std::string lidarDir;
 	std::string calibDir;
+	std::string predDir;
 
 	std::clock_t start;
 
@@ -119,6 +128,9 @@ private:
 	Eigen::Matrix4f cal_Matrix_02;
 	Eigen::Matrix4f cal_Matrix_03;
 	Eigen::Matrix4f cal_Matrix_05;
+	Eigen::Matrix4f cal_Matrix_LC;
+	Eigen::Matrix3f cal_Matrix_CL_R;
+	Eigen::Vector3f cal_Matrix_CL_t;
 
 	cv_bridge::CvImagePtr cv_ptr;
 
@@ -133,6 +145,7 @@ private:
 
 	Eigen::MatrixXf _tmp;
 
+	std::vector<std::vector<int>> edge_map;
 	// for undistortion
 	double lidar_period;
 	double last_stamp;

@@ -2,24 +2,27 @@
 
 using namespace message_filters;
 
-LidarCameraSync::LidarCameraSync(const int& lidarNums, const int lidar_Hz, const bool _correct_distortion)
+LidarCameraSync::LidarCameraSync(const int& lidarNums, const int lidar_Hz, const bool _correct_distortion, const bool publish_bbox)
 								:firstSeq(-1),
                                 calib_parsed(false),
                                 ptrCloud_4(new pcl::PointCloud<pcl::PointXYZI>()),
                                 ptrCloud_3(new pcl::PointCloud<pcl::PointXYZI>()),
                                 ptrCloud_5(new pcl::PointCloud<pcl::PointXYZI>()),
                                 ptrCloud_1(new pcl::PointCloud<pcl::PointXYZI>()),
-                                ptrCloud_2(new pcl::PointCloud<pcl::PointXYZI>()),                              
-                                imageDir("/home/vince/Documents/Mcity/DensoData/Images/"),
-                                lidarDir("/home/vince/Documents/Mcity/DensoData/Pointcloud/") //need current directory
+                                ptrCloud_2(new pcl::PointCloud<pcl::PointXYZI>()),
+                                predDir("/home/vince/Documents/Mcity/Sync/data/"),                              
+                                imageDir("/home/vince/Documents/Mcity/DensoData/Images_unrect/"),
+                                lidarDir("/home/vince/Documents/Mcity/DensoData/Pointcloud_unrect/") //need current directory
 {
+    publish_3dbbox = publish_bbox;
     correct_distortion = _correct_distortion;
     lidar_period = 1.0/lidar_Hz;
     lidar_number = lidarNums;
     Camera.subscribe(nh, "/image_raw", 5);
     GPS.subscribe(nh, "/odom", 5);
     Lidar_4.subscribe(nh,"/pointcloud04",10);
-
+    std::vector<std::vector<int>> tmp_map{{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+    edge_map = tmp_map;
     // parse_Calibration();
 
     if (lidarNums == 3) {
@@ -44,7 +47,10 @@ LidarCameraSync::LidarCameraSync(const int& lidarNums, const int lidar_Hz, const
         sync1->registerCallback(boost::bind(&LidarCameraSync::callback_1lidar, this, _1, _2, _3));
         
     } else ROS_ERROR("Invalid lidar number, please input 1, 3 or 5");
-
+    if (publish_3dbbox)
+    {
+        pred_bbox = nh.advertise<visualization_msgs::Marker>("/pred_bbox",1);
+    }
     pub_pointcloud = nh.advertise<sensor_msgs::PointCloud2>("/vlp_fuse", 1);
     pub_pointcloud_wo_correction = nh.advertise<sensor_msgs::PointCloud2>("/vlp_fuse_wo_correction", 1);
 
@@ -56,14 +62,29 @@ void LidarCameraSync::callback_1lidar(const sensor_msgs::ImageConstPtr& Camera_m
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04)
 {
     update_variables(Camera_msg, GPS_msg, Lidar_msg_04);
+    if (!calib_parsed){
+
+        cal_Matrix_LC<<0.99757, -0.0689411, -0.00999908, -0.126208,
+                    -0.00379972, 0.0894736, -0.995982, -0.726174,
+                     0.0695588, 0.9936, 0.0889943, -0.664635,
+                     0.0,           0.0,          0.0,           1.0;
+        Eigen::Matrix4f tmp = cal_Matrix_LC.inverse();
+        cal_Matrix_CL_R = tmp.block<3,3>(0,0);
+        cal_Matrix_CL_t <<tmp(0,3),tmp(1,3),tmp(2,3);
+        calib_parsed = true;
+    }
 
     ROS_INFO_STREAM("Camera_msg received at " << Camera_msg->header.stamp<<" Seq: "<<Camera_msg->header.seq);
     ROS_INFO_STREAM("GPS_msg received at " << GPS_msg->header.stamp<<" Seq: "<<GPS_msg->header.seq);
     ROS_INFO_STREAM("Lidar_msg_04 received at " << Lidar_msg_04->header.stamp<<" Seq: "<<Lidar_msg_04->header.seq);
 
     pcl::fromROSMsg(*Lidar_msg_04,*ptrCloud_4);
-    // write_camera(Camera_msg);
-    // write_Lidar(ptrCloud_4);
+    if (publish_3dbbox){
+        publish_prediction();
+    } else {
+        write_camera(Camera_msg);
+        write_Lidar(ptrCloud_4);   
+    }
     pcl::toROSMsg(*ptrCloud_4, output);
     pub_pointcloud_wo_correction.publish(output);
 
@@ -95,6 +116,13 @@ void LidarCameraSync::callback_3lidar(const sensor_msgs::ImageConstPtr& Camera_m
                     -0.0100379,   0.999576, -0.0273196, -0.0179415,
                     -0.285391,  0.0233208 ,  0.958127, -0.0886846,
                     0.0,          0.0 ,         0.0,          1.0; 
+        cal_Matrix_LC<<0.99757, -0.0689411, -0.00999908, -0.126208,
+                    -0.00379972, 0.0894736, -0.995982, -0.726174,
+                     0.0695588, 0.9936, 0.0889943, -0.664635,
+                     0.0,           0.0,          0.0,           1.0;
+        Eigen::Matrix4f tmp = cal_Matrix_LC.inverse();
+        cal_Matrix_CL_R = tmp.block<3,3>(0,0);
+        cal_Matrix_CL_t <<tmp(0,3),tmp(1,3),tmp(2,3);
         calib_parsed = true;
     }
     ROS_INFO_STREAM("Camera_msg received at " << Camera_msg->header.stamp<<" Seq: "<<Camera_msg->header.seq);
@@ -112,9 +140,13 @@ void LidarCameraSync::callback_3lidar(const sensor_msgs::ImageConstPtr& Camera_m
     *ptrCloud_4 += *ptrCloud_3;
     *ptrCloud_4 += *ptrCloud_5;
 
-    // write_camera(Camera_msg);
-    // write_Lidar(ptrCloud_4);
-
+    if (publish_3dbbox){
+        publish_prediction();
+    } else {
+        write_camera(Camera_msg);
+        write_Lidar(ptrCloud_4);   
+    }
+    
     pcl::toROSMsg(*ptrCloud_4, output);
     pub_pointcloud.publish(output);
 
@@ -152,13 +184,20 @@ void LidarCameraSync::callback_5lidar(const sensor_msgs::ImageConstPtr& Camera_m
                     -0.0100379,   0.999576, -0.0273196, -0.0179415,
                     -0.285391,  0.0233208 ,  0.958127, -0.0886846,
                     0.0,          0.0 ,         0.0,          1.0; 
+        cal_Matrix_LC<<0.99757, -0.0689411, -0.00999908, -0.126208,
+                    -0.00379972, 0.0894736, -0.995982, -0.726174,
+                     0.0695588, 0.9936, 0.0889943, -0.664635,
+                     0.0,           0.0,          0.0,           1.0;
+        Eigen::Matrix4f tmp = cal_Matrix_LC.inverse();
+        cal_Matrix_CL_R = tmp.block<3,3>(0,0);
+        cal_Matrix_CL_t <<tmp(0,3),tmp(1,3),tmp(2,3);
         calib_parsed = true;
     }
     
 
     // Topic Info
-    ROS_INFO_STREAM("Camera_msg received at " << Camera_msg->header.stamp.toSec()<<" Seq: "<<Camera_msg->header.seq);
-    ROS_INFO_STREAM("GPS_msg received at " << GPS_msg->header.stamp.toSec()<<" Seq: "<<GPS_msg->header.seq);
+    ROS_INFO_STREAM("Camera_msg received at " << Camera_msg->header.stamp<<" Seq: "<<Camera_msg->header.seq);
+    ROS_INFO_STREAM("GPS_msg received at " << GPS_msg->header.stamp<<" Seq: "<<GPS_msg->header.seq);
     ROS_INFO_STREAM("Lidar_msg_01 received at " << Lidar_msg_01->header.stamp<<" Seq: "<<Lidar_msg_03->header.seq);
     ROS_INFO_STREAM("Lidar_msg_02 received at " << Lidar_msg_02->header.stamp<<" Seq: "<<Lidar_msg_04->header.seq);
     ROS_INFO_STREAM("Lidar_msg_03 received at " << Lidar_msg_03->header.stamp<<" Seq: "<<Lidar_msg_03->header.seq);
@@ -188,15 +227,19 @@ void LidarCameraSync::callback_5lidar(const sensor_msgs::ImageConstPtr& Camera_m
 
     // Try to correct z axis
     // pcl::transformPointCloud (*ptrCloud_4, *ptrCloud_4, _CL_1);
-    // write_camera(Camera_msg);
-    // write_Lidar(ptrCloud_4);
+    if (publish_3dbbox){
+        publish_prediction();
+    } else {
+        write_camera(Camera_msg);
+        write_Lidar(ptrCloud_4);   
+    }
 
     pcl::toROSMsg(*ptrCloud_4, output);
     pub_pointcloud.publish(output);
 
     ROS_INFO_STREAM("Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC / 1000) << " ms, Frames: "<<((Camera_msg->header.seq) - firstSeq+1));
 }
-void LidarCameraSync::parse_Calibration(){
+void LidarCameraSync::parse_Calibration(){ // I am too lazy to write this...
 
     calib_parsed = true;
 }
@@ -234,10 +277,109 @@ void LidarCameraSync::write_camera(const sensor_msgs::ImageConstPtr& Camera_msg)
     Image = cv_ptr->image;
     //Convert image into .jpg file
     boost::format fmt(imageDir + "%06d.jpg");
-    fmt % (Camera_msg->header.seq - firstSeq);
+    fmt % frameNums;
     cv::imwrite(fmt.str(), Image);
 }
 
+void LidarCameraSync::publish_prediction(){
+    boost::format fmt(predDir + "%06d.txt");
+    fmt % frameNums;
+    std::vector<std::array<float,16>> prediction = read_prediction(fmt.str());
+    // do things to publish markers
+    // markers format: [0] class, [1].[2],[3] don't care, [4],[5],[6],[7] 2d bbox xmin, ymin, xman, ymax
+    // [8] height [9] width [10] length [11][12][13] location xyz [14] rotation-y [15] score (ratio)
+    if (prediction.empty())return;
+    visualization_msgs::Marker bbox;
+    bbox.header.frame_id = "velodyne";
+    bbox.header.stamp = ros::Time::now();
+    bbox.ns = "prediction";
+    bbox.id = 0;
+    bbox.type = visualization_msgs::Marker::LINE_LIST;
+    bbox.action = visualization_msgs::Marker::ADD;
+    bbox.scale.x = 0.1;
+    bbox.color.g = 1.0;
+    bbox.color.a = 1.0;
+    for (auto it = prediction.begin(); it != prediction.end(); it++){ // for each 3d bbox
+        if (it->empty()) continue; // it is not supposed to be empty but who knows.
+        Eigen::Matrix3f R;
+        Eigen::MatrixXf corners(3,8);
+        float roty = (*it)[14];
+        float h = (*it)[8];
+        float w = (*it)[9];
+        float l = (*it)[10];
+        float x = (*it)[11];
+        float y = (*it)[12];
+        float z = (*it)[13];
+        R = Eigen::AngleAxisf(roty,  Eigen::Vector3f::UnitY());
+        corners<<l/2.0, l/2.0, -l/2.0, -l/2.0, l/2.0, l/2.0, -l/2.0, -l/2.0,
+                0.0, 0.0, 0.0, 0.0, -h, -h, -h, -h,
+                w/2.0, -w/2.0, -w/2.0, w/2.0, w/2.0, -w/2.0, -w/2.0, w/2.0;
+        // std::cout<<"corners after init: "<<corners(0,0)<<std::endl;
+        corners = R*corners;
+        // std::cout<<"corners after R: "<<corners(0,0)<<std::endl;
+        // Add translation x,y,z
+        corners.row(0) += x*Eigen::MatrixXf::Ones(1,8);
+        corners.row(1) += y*Eigen::MatrixXf::Ones(1,8);
+        corners.row(2) += z*Eigen::MatrixXf::Ones(1,8);
+        // std::cout<<"corners after translation: "<<corners(0,0)<<std::endl;
+        
+        corners = cal_Matrix_CL_R * corners;
+        // std::cout<<"corners after CL_R: "<<corners(0,0)<<std::endl;
+        // Add translation cal_Matrix_CL_t
+        corners.row(0) += cal_Matrix_CL_t(0)*Eigen::MatrixXf::Ones(1,8);
+        corners.row(1) += cal_Matrix_CL_t(1)*Eigen::MatrixXf::Ones(1,8);
+        corners.row(2) += cal_Matrix_CL_t(2)*Eigen::MatrixXf::Ones(1,8);
+        // std::cout<<"corners after CL_t: "<<corners(0,0)<<std::endl;
+        // Add 12 edges
+        // 0-1,1-2,2-3,3-0//4-5,5-6,6-7,7-4//0-4,1-5,2-6,3-7//
+        for (int i = 0; i<12;i++){ // for each edges
+            geometry_msgs::Point tmp_p1;
+            geometry_msgs::Point tmp_p2;
+            tmp_p1.x = corners(0,edge_map[i][0]);
+            tmp_p1.y = corners(1,edge_map[i][0]);
+            tmp_p1.z = corners(2,edge_map[i][0]);
+            tmp_p2.x = corners(0,edge_map[i][1]);
+            tmp_p2.y = corners(1,edge_map[i][1]);
+            tmp_p2.z = corners(2,edge_map[i][1]);
+            bbox.points.push_back(tmp_p1);
+            bbox.points.push_back(tmp_p2);
+        }
+        
+    }
+    pred_bbox.publish(bbox);
+    
+}
+std::vector<std::array<float,16>> LidarCameraSync::read_prediction(std::string name){
+    std::string line;
+    std::vector<std::array<float,16>> result;
+    std::ifstream myfile(name);
+    // std::cout<<"name: "<<name<<std::endl;
+    if (myfile.is_open()) {
+        while (std::getline(myfile,line)){
+            std::array<float, 16> tmp;
+            // cout << line << '\n';
+            // from line to array
+            std::istringstream iss(line);
+            for (int i = 0;i < 16; i++){
+                std::string tmp_string;
+                iss >> tmp_string;
+                if(i == 0){
+                    if (tmp_string == "Car") tmp[i] = 1;
+                    else if (tmp_string == "Pedestrian") tmp[i] = 2;
+                    else tmp[i] = 0;
+                }else{
+                    tmp[i] = std::stof(tmp_string);
+                }
+                // std::cout<<tmp[i]<<" ";
+            }
+            // std::cout<<std::endl;
+            result.push_back(tmp);
+        }
+    myfile.close();
+    }
+    else ROS_ERROR("Unable to open prediction file"); 
+    return result;
+}
 void LidarCameraSync::transform_pointcloud(){
 
     // Things need to be done:
@@ -291,7 +433,7 @@ void LidarCameraSync::_transform_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr
 void LidarCameraSync::_undistort_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr ptrCloud){
 
     // do nothing at the first frame
-    if(frameNums == 1) return;
+    if(frameNums == 0) return;
     else{
         double _delta_t = current_stamp - last_stamp;
         double __ratio = lidar_period/_delta_t;
@@ -359,7 +501,12 @@ void LidarCameraSync::update_variables(const sensor_msgs::ImageConstPtr& Camera_
         // last_pose_z = pose_z;
         last_theta = theta;
     }
-    frameNums = Camera_msg->header.seq - firstSeq + 1;
+    if (publish_3dbbox)
+    {
+        frameNums = Camera_msg->header.seq - firstSeq + 9;
+    }else{
+        frameNums = Camera_msg->header.seq - firstSeq;
+    }
 }
 
 inline double LidarCameraSync::angle_diff(double leftAngle, double rightAngle){
