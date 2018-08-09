@@ -43,8 +43,9 @@ LidarCameraSync::LidarCameraSync(const int& lidarNums, const int lidar_Hz, const
 
     } else if(lidarNums == 1){
 
-        sync1.reset(new Sync1(MySyncPolicy1(10), Camera, GPS, Lidar_4));   
-        sync1->registerCallback(boost::bind(&LidarCameraSync::callback_1lidar, this, _1, _2, _3));
+        // sync1.reset(new Sync1(MySyncPolicy1(10), Camera, GPS, Lidar_4)); 
+        sync1.reset(new Sync1(MySyncPolicy1(10), Camera, Lidar_4));  
+        sync1->registerCallback(boost::bind(&LidarCameraSync::callback_1lidar, this, _1, _2));
         
     } else ROS_ERROR("Invalid lidar number, please input 1, 3 or 5");
     if (publish_3dbbox)
@@ -58,16 +59,46 @@ LidarCameraSync::LidarCameraSync(const int& lidarNums, const int lidar_Hz, const
 
 
 void LidarCameraSync::callback_1lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                    const nav_msgs::Odometry::ConstPtr& GPS_msg, 
+                                    // const sensor_msgs::ImuConstPtr& GPS_msg, 
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04)
 {
-    update_variables(Camera_msg, GPS_msg, Lidar_msg_04);
+    start = std::clock();
+    current_stamp = double(Lidar_msg_04->header.stamp.sec) + double(Lidar_msg_04->header.stamp.nsec)*1e-9;
+
+    // pose_x = GPS_msg->pose.pose.position.z;
+    // pose_y = GPS_msg->pose.pose.position.x;
+
+    // double q1 = GPS_msg->pose.pose.orientation.x;
+    // double q2 = GPS_msg->pose.pose.orientation.y;
+    // double q3 = GPS_msg->pose.pose.orientation.z;
+    // double q0 = GPS_msg->pose.pose.orientation.w;
+
+    // theta = atan2(2*(q0*q3+q1*q2),1-2*(q2*q2+q3*q3)); // rotation on z axis
+
+    if(firstSeq == -1){
+        firstSeq = Camera_msg->header.seq;
+        frameNums = -1;
+        last_stamp = current_stamp;
+        last_pose_x = pose_x;
+        last_pose_y = pose_y;
+        // last_pose_z = pose_z;
+        last_theta = theta;
+    }
+    if (publish_3dbbox)
+    {
+        frameNums++;
+    }
+    if (frameNums == 177) frameNums =181; // lost 5 frame ptrcloud 
     if (!calib_parsed){
 
-        cal_Matrix_LC<<0.99757, -0.0689411, -0.00999908, -0.126208,
-                    -0.00379972, 0.0894736, -0.995982, -0.726174,
-                     0.0695588, 0.9936, 0.0889943, -0.664635,
+        cal_Matrix_LC<<7.533745e-03, -9.999714e-01, -6.166020e-04, -4.069766e-03,
+                    1.480249e-02, 7.280733e-04, -9.998902e-01, -7.631618e-02,
+                     9.998621e-01, 7.523790e-03, 1.480755e-02, -2.717806e-01,
                      0.0,           0.0,          0.0,           1.0;
+        cal_Matrix_CL_R_rec<<9.999239e-01, 9.837760e-03, -7.445048e-03,
+                         -9.869795e-03, 9.999421e-01, -4.278459e-03,
+                          7.402527e-03, 4.351614e-03, 9.999631e-01;
+        // R_rect_00: 9.999239e-01 9.837760e-03 -7.445048e-03 -9.869795e-03 9.999421e-01 -4.278459e-03 7.402527e-03 4.351614e-03 9.999631e-01
         Eigen::Matrix4f tmp = cal_Matrix_LC.inverse();
         cal_Matrix_CL_R = tmp.block<3,3>(0,0);
         cal_Matrix_CL_t <<tmp(0,3),tmp(1,3),tmp(2,3);
@@ -75,7 +106,7 @@ void LidarCameraSync::callback_1lidar(const sensor_msgs::ImageConstPtr& Camera_m
     }
 
     ROS_INFO_STREAM("Camera_msg received at " << Camera_msg->header.stamp<<" Seq: "<<Camera_msg->header.seq);
-    ROS_INFO_STREAM("GPS_msg received at " << GPS_msg->header.stamp<<" Seq: "<<GPS_msg->header.seq);
+    // ROS_INFO_STREAM("GPS_msg received at " << GPS_msg->header.stamp<<" Seq: "<<GPS_msg->header.seq);
     ROS_INFO_STREAM("Lidar_msg_04 received at " << Lidar_msg_04->header.stamp<<" Seq: "<<Lidar_msg_04->header.seq);
 
     pcl::fromROSMsg(*Lidar_msg_04,*ptrCloud_4);
@@ -93,10 +124,10 @@ void LidarCameraSync::callback_1lidar(const sensor_msgs::ImageConstPtr& Camera_m
     pcl::toROSMsg(*ptrCloud_4, output);
     pub_pointcloud.publish(output);
 
-    ROS_INFO_STREAM("Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC / 1000) << " ms, Frames: "<<((Camera_msg->header.seq) - firstSeq+1));
+    ROS_INFO_STREAM("Time: " << (std::clock() - start) / (double)(CLOCKS_PER_SEC / 1000) << " ms, Frames: "<<frameNums);
 }
 void LidarCameraSync::callback_3lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                    const nav_msgs::Odometry::ConstPtr& GPS_msg,
+                                    const sensor_msgs::ImuConstPtr& GPS_msg,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_03, 
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04, 
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_05)
@@ -154,7 +185,7 @@ void LidarCameraSync::callback_3lidar(const sensor_msgs::ImageConstPtr& Camera_m
 
 }
 void LidarCameraSync::callback_5lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                    const nav_msgs::Odometry::ConstPtr& GPS_msg,
+                                    const sensor_msgs::ImuConstPtr& GPS_msg,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_01,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_02,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_03, 
@@ -290,9 +321,10 @@ void LidarCameraSync::publish_prediction(){
     // [8] height [9] width [10] length [11][12][13] location xyz [14] rotation-y [15] score (ratio)
     if (prediction.empty())return;
     visualization_msgs::Marker bbox;
-    bbox.header.frame_id = "velodyne";
+    bbox.header.frame_id = "velo_link";
     bbox.header.stamp = ros::Time::now();
     bbox.ns = "prediction";
+    bbox.lifetime = ros::Duration(0.11);
     bbox.id = 0;
     bbox.type = visualization_msgs::Marker::LINE_LIST;
     bbox.action = visualization_msgs::Marker::ADD;
@@ -322,7 +354,9 @@ void LidarCameraSync::publish_prediction(){
         corners.row(1) += y*Eigen::MatrixXf::Ones(1,8);
         corners.row(2) += z*Eigen::MatrixXf::Ones(1,8);
         // std::cout<<"corners after translation: "<<corners(0,0)<<std::endl;
-        
+        corners = cal_Matrix_CL_R_rec.inverse() * corners;
+
+        // From reference frame to velodyne frame
         corners = cal_Matrix_CL_R * corners;
         // std::cout<<"corners after CL_R: "<<corners(0,0)<<std::endl;
         // Add translation cal_Matrix_CL_t
@@ -377,7 +411,7 @@ std::vector<std::array<float,16>> LidarCameraSync::read_prediction(std::string n
         }
     myfile.close();
     }
-    else ROS_ERROR("Unable to open prediction file"); 
+    else ROS_ERROR("Unable to open prediction file: %s ",name.c_str()); 
     return result;
 }
 void LidarCameraSync::transform_pointcloud(){
@@ -433,68 +467,69 @@ void LidarCameraSync::_transform_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr
 void LidarCameraSync::_undistort_pointcloud(pcl::PointCloud<pcl::PointXYZI>::Ptr ptrCloud){
 
     // do nothing at the first frame
-    if(frameNums == 0) return;
-    else{
-        double _delta_t = current_stamp - last_stamp;
-        double __ratio = lidar_period/_delta_t;
-        double _delta_x = (pose_x - last_pose_x) * __ratio;
-        double _delta_y = (pose_y - last_pose_y) * __ratio;
+    // if(frameNums == 0) return;
+    // else{
+    //     double _delta_t = current_stamp - last_stamp;
+    //     double __ratio = lidar_period/_delta_t;
+    //     double _delta_x = (pose_x - last_pose_x) * __ratio;
+    //     double _delta_y = (pose_y - last_pose_y) * __ratio;
 
 
-        double _delta_theta = angle_diff(theta , last_theta) * __ratio; //in the interval [-pi,+pi] radians
+    //     double _delta_theta = angle_diff(theta , last_theta) * __ratio; //in the interval [-pi,+pi] radians
 
-        double _theta_start = atan2((*ptrCloud)[0].y,(*ptrCloud)[0].x); //in the interval [-pi,+pi] radians
-        double _theta_end = atan2((*ptrCloud)[ptrCloud->size()-1].y,(*ptrCloud)[ptrCloud->size()-1].x);
-        double _full_range = angle_diff_2pi(_theta_end, _theta_start);
-        if (_full_range < 1.0) // sometime the lidar point cloud range is over 2pi 
-        {
-            _full_range = 2.0 * M_PI + _full_range;
-        }
-        // std::cout << "_delta_x: "<<_delta_x<<" _delta_y: "<<_delta_y<<" _delta_theta: "<<_delta_theta <<std::endl;
-        // std::cout << "_theta_start: "<<_theta_start<<" _theta_end: "<<_theta_end <<std::endl;
-        for (int i = 0; i < ptrCloud->size(); ++i)
-        {
-            double _theta_point = atan2((*ptrCloud)[i].y,(*ptrCloud)[i].x);
-            double _range_xy = sqrt(((*ptrCloud)[i].x*(*ptrCloud)[i].x)+((*ptrCloud)[i].y*(*ptrCloud)[i].y));
-            double _part_range = angle_diff_2pi(_theta_point, _theta_start);
-            if (i > ptrCloud->size()/1.33 && _part_range < 1.0){
-                _part_range = 2.0 * M_PI + _part_range;
-            }
-            double _ratio = (_part_range/_full_range);
+    //     double _theta_start = atan2((*ptrCloud)[0].y,(*ptrCloud)[0].x); //in the interval [-pi,+pi] radians
+    //     double _theta_end = atan2((*ptrCloud)[ptrCloud->size()-1].y,(*ptrCloud)[ptrCloud->size()-1].x);
+    //     double _full_range = angle_diff_2pi(_theta_end, _theta_start);
+    //     if (_full_range < 1.0) // sometime the lidar point cloud range is over 2pi 
+    //     {
+    //         _full_range = 2.0 * M_PI + _full_range;
+    //     }
+    //     // std::cout << "_delta_x: "<<_delta_x<<" _delta_y: "<<_delta_y<<" _delta_theta: "<<_delta_theta <<std::endl;
+    //     // std::cout << "_theta_start: "<<_theta_start<<" _theta_end: "<<_theta_end <<std::endl;
+    //     for (int i = 0; i < ptrCloud->size(); ++i)
+    //     {
+    //         double _theta_point = atan2((*ptrCloud)[i].y,(*ptrCloud)[i].x);
+    //         double _range_xy = sqrt(((*ptrCloud)[i].x*(*ptrCloud)[i].x)+((*ptrCloud)[i].y*(*ptrCloud)[i].y));
+    //         double _part_range = angle_diff_2pi(_theta_point, _theta_start);
+    //         if (i > ptrCloud->size()/1.33 && _part_range < 1.0){
+    //             _part_range = 2.0 * M_PI + _part_range;
+    //         }
+    //         double _ratio = (_part_range/_full_range);
 
-            // if (i == 0 || i == (ptrCloud->size()-1)/2||i == ptrCloud->size()-1){
-            //     std::cout <<"_ratio: "<< _ratio<< " _theta_point: "<<_theta_point<<" _range_xy: "<<_range_xy<<std::endl;
-            //     std::cout <<"old x: "<< (*ptrCloud)[i].x << " old y: "<<(*ptrCloud)[i].y<<std::endl;
-            // }
-            _theta_point = _theta_point - _delta_theta*_ratio;
-            (*ptrCloud)[i].x = cos(_theta_point)*_range_xy - _delta_x*_ratio;
-            (*ptrCloud)[i].y = sin(_theta_point)*_range_xy - _delta_y*_ratio;
-            // if (i == 0 || i == (ptrCloud->size()-1)/2||i == ptrCloud->size()-1){
-            //     std::cout <<"new x: "<< (*ptrCloud)[i].x << " new y: "<<(*ptrCloud)[i].y<<" _theta_point: "<<_theta_point<<std::endl;
-            // }
-        }
-    }
+    //         // if (i == 0 || i == (ptrCloud->size()-1)/2||i == ptrCloud->size()-1){
+    //         //     std::cout <<"_ratio: "<< _ratio<< " _theta_point: "<<_theta_point<<" _range_xy: "<<_range_xy<<std::endl;
+    //         //     std::cout <<"old x: "<< (*ptrCloud)[i].x << " old y: "<<(*ptrCloud)[i].y<<std::endl;
+    //         // }
+    //         _theta_point = _theta_point - _delta_theta*_ratio;
+    //         (*ptrCloud)[i].x = cos(_theta_point)*_range_xy - _delta_x*_ratio;
+    //         (*ptrCloud)[i].y = sin(_theta_point)*_range_xy - _delta_y*_ratio;
+    //         // if (i == 0 || i == (ptrCloud->size()-1)/2||i == ptrCloud->size()-1){
+    //         //     std::cout <<"new x: "<< (*ptrCloud)[i].x << " new y: "<<(*ptrCloud)[i].y<<" _theta_point: "<<_theta_point<<std::endl;
+    //         // }
+    //     }
+    // }
 }
 void LidarCameraSync::update_variables(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                        const nav_msgs::Odometry::ConstPtr& GPS_msg, 
+                                        const sensor_msgs::ImuConstPtr& GPS_msg, 
                                         const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04)
 {
 
     start = std::clock();
     current_stamp = double(Lidar_msg_04->header.stamp.sec) + double(Lidar_msg_04->header.stamp.nsec)*1e-9;
 
-    pose_x = GPS_msg->pose.pose.position.z;
-    pose_y = GPS_msg->pose.pose.position.x;
+    // pose_x = GPS_msg->pose.pose.position.z;
+    // pose_y = GPS_msg->pose.pose.position.x;
 
-    double q1 = GPS_msg->pose.pose.orientation.x;
-    double q2 = GPS_msg->pose.pose.orientation.y;
-    double q3 = GPS_msg->pose.pose.orientation.z;
-    double q0 = GPS_msg->pose.pose.orientation.w;
+    // double q1 = GPS_msg->pose.pose.orientation.x;
+    // double q2 = GPS_msg->pose.pose.orientation.y;
+    // double q3 = GPS_msg->pose.pose.orientation.z;
+    // double q0 = GPS_msg->pose.pose.orientation.w;
 
-    theta = atan2(2*(q0*q3+q1*q2),1-2*(q2*q2+q3*q3)); // rotation on z axis
+    // theta = atan2(2*(q0*q3+q1*q2),1-2*(q2*q2+q3*q3)); // rotation on z axis
 
     if(firstSeq == -1){
         firstSeq = Camera_msg->header.seq;
+        frameNums = -1;
         last_stamp = current_stamp;
         last_pose_x = pose_x;
         last_pose_y = pose_y;
@@ -503,7 +538,7 @@ void LidarCameraSync::update_variables(const sensor_msgs::ImageConstPtr& Camera_
     }
     if (publish_3dbbox)
     {
-        frameNums = Camera_msg->header.seq - firstSeq + 9;
+        frameNums++;
     }else{
         frameNums = Camera_msg->header.seq - firstSeq;
     }

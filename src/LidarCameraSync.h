@@ -3,6 +3,7 @@
 
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/Imu.h>
 #include <sensor_msgs/Image.h>
 #include <nav_msgs/Odometry.h>
 #include <visualization_msgs/Marker.h>
@@ -45,15 +46,15 @@ public:
 	//~LidarCameraSync();
 
 	void callback_1lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                    const nav_msgs::Odometry::ConstPtr& GPS_msg, 
+                                    // const sensor_msgs::ImuConstPtr& GPS_msg, 
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04);
 	void callback_3lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                    const nav_msgs::Odometry::ConstPtr& GPS_msg,
+                                    const sensor_msgs::ImuConstPtr& GPS_msg,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_03, 
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04, 
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_05);
 	void callback_5lidar(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                    const nav_msgs::Odometry::ConstPtr& GPS_msg,
+                                    const sensor_msgs::ImuConstPtr& GPS_msg,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_01,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_02,
                                     const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_03, 
@@ -67,7 +68,7 @@ protected:
 	void publish_prediction();
 	void transform_pointcloud();
 	void update_variables(const sensor_msgs::ImageConstPtr& Camera_msg,
-                                        const nav_msgs::Odometry::ConstPtr& GPS_msg, 
+                                        const sensor_msgs::ImuConstPtr& GPS_msg, 
                                         const sensor_msgs::PointCloud2ConstPtr& Lidar_msg_04);
 
 private:
@@ -93,12 +94,12 @@ private:
     message_filters::Subscriber<sensor_msgs::PointCloud2> Lidar_4;
     message_filters::Subscriber<sensor_msgs::PointCloud2> Lidar_5;
 
-    Subscriber<nav_msgs::Odometry> GPS;
+    Subscriber<sensor_msgs::Imu> GPS;
 
-    typedef sync_policies::ApproximateTime<sensor_msgs::Image, nav_msgs::Odometry, sensor_msgs::PointCloud2> MySyncPolicy1;
-    typedef sync_policies::ApproximateTime<sensor_msgs::Image, nav_msgs::Odometry, sensor_msgs::PointCloud2, 
+    typedef sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::PointCloud2> MySyncPolicy1;
+    typedef sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Imu, sensor_msgs::PointCloud2, 
     sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> MySyncPolicy3;
-    typedef sync_policies::ApproximateTime<sensor_msgs::Image, nav_msgs::Odometry, sensor_msgs::PointCloud2, 
+    typedef sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Imu, sensor_msgs::PointCloud2, 
     sensor_msgs::PointCloud2, sensor_msgs::PointCloud2, sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> MySyncPolicy5;
 
     typedef Synchronizer<MySyncPolicy1> Sync1;
@@ -130,6 +131,7 @@ private:
 	Eigen::Matrix4f cal_Matrix_05;
 	Eigen::Matrix4f cal_Matrix_LC;
 	Eigen::Matrix3f cal_Matrix_CL_R;
+	Eigen::Matrix3f cal_Matrix_CL_R_rec;
 	Eigen::Vector3f cal_Matrix_CL_t;
 
 	cv_bridge::CvImagePtr cv_ptr;
